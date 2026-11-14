@@ -6,12 +6,16 @@ import android.content.pm.PackageManager
 import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.os.Bundle
+import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ScrollView
+import android.widget.Spinner
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
@@ -38,11 +42,20 @@ class MainActivity : ComponentActivity() {
     private lateinit var referenceInput: EditText
     private lateinit var modeGroup: RadioGroup
     private lateinit var recordButton: Button
+    private lateinit var exampleSpinner: Spinner
 
     private var recorder: MediaRecorder? = null
     private var player: MediaPlayer? = null
     private var audioFile: File? = null
     private var recording = false
+
+    private val examples = listOf(
+        "How are you doing today?",
+        "What do you want to eat?",
+        "I have to go to school.",
+        "Would you like some coffee?",
+        "I've been waiting for you."
+    )
 
     private val permissionRequest =
         registerForActivityResult(
@@ -61,7 +74,7 @@ class MainActivity : ComponentActivity() {
         audioFile = File(filesDir, "speech_test.m4a")
 
         buildScreen()
-        setStatus("기준 문장을 입력하고 녹음을 시작하세요.")
+        setStatus("예문을 선택하고 녹음을 시작하세요.")
     }
 
     private fun buildScreen() {
@@ -78,17 +91,54 @@ class MainActivity : ComponentActivity() {
         })
 
         content.addView(TextView(this).apply {
-            text = "① 기준 영어 문장"
+            text = "① 예문 선택"
             textSize = 17f
         })
 
         referenceInput = EditText(this).apply {
-            hint = "예: How are you doing today?"
+            hint = "영어 문장을 직접 입력할 수도 있습니다."
             textSize = 18f
             minLines = 2
             setPadding(12, 12, 12, 12)
         }
 
+        exampleSpinner = Spinner(this)
+
+        val exampleLabels = examples.mapIndexed { index, sentence ->
+            "${index + 1}. $sentence"
+        }
+
+        val adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_item,
+            exampleLabels
+        ).apply {
+            setDropDownViewResource(
+                android.R.layout.simple_spinner_dropdown_item
+            )
+        }
+
+        exampleSpinner.adapter = adapter
+
+        exampleSpinner.onItemSelectedListener =
+            object : AdapterView.OnItemSelectedListener {
+
+                override fun onItemSelected(
+                    parent: AdapterView<*>?,
+                    view: View?,
+                    position: Int,
+                    id: Long
+                ) {
+                    referenceInput.setText(examples[position])
+                    comparison.text = "새 예문을 선택했습니다."
+                    result.text = "아직 인식 결과가 없습니다."
+                }
+
+                override fun onNothingSelected(parent: AdapterView<*>?) {
+                }
+            }
+
+        content.addView(exampleSpinner)
         content.addView(referenceInput)
 
         content.addView(TextView(this).apply {
@@ -173,13 +223,13 @@ class MainActivity : ComponentActivity() {
         content.addView(result)
 
         content.addView(TextView(this).apply {
-            text = "④ 기준 문장과 비교"
+            text = "④ 단어별 비교 결과"
             textSize = 17f
             setPadding(0, 12, 0, 4)
         })
 
         comparison = TextView(this).apply {
-            textSize = 19f
+            textSize = 17f
             setPadding(0, 8, 0, 20)
             text = "녹음 후 자동으로 비교합니다."
         }
@@ -246,7 +296,7 @@ class MainActivity : ComponentActivity() {
 
             recordButton.text = "녹음 종료"
 
-            setStatus("녹음 중… 문장을 말한 뒤 녹음 종료를 누르세요.")
+            setStatus("녹음 중… 문장을 말한 뒤 종료하세요.")
 
         } catch (e: Exception) {
 
@@ -277,11 +327,11 @@ class MainActivity : ComponentActivity() {
             val size = audioFile?.length() ?: 0L
 
             if (size == 0L) {
-                setStatus("녹음 파일이 비어 있습니다. 다시 녹음해 주세요.")
+                setStatus("녹음 파일이 비어 있습니다.")
                 return
             }
 
-            setStatus("녹음 저장 완료. 자동 음성인식을 시작합니다.")
+            setStatus("녹음 저장 완료. 자동 인식 중…")
 
             recognizeFile()
 
@@ -294,6 +344,7 @@ class MainActivity : ComponentActivity() {
 
             recorder = null
             recording = false
+
             recordButton.text = "③ 녹음 시작"
 
             setStatus("녹음 저장 실패: ${e.message}")
@@ -351,20 +402,23 @@ class MainActivity : ComponentActivity() {
             return "비교할 문장이 충분하지 않습니다."
         }
 
-        val dp = Array(expected.size + 1) {
-            IntArray(actual.size + 1)
+        val n = expected.size
+        val m = actual.size
+
+        val dp = Array(n + 1) {
+            IntArray(m + 1)
         }
 
-        for (i in 0..expected.size) {
+        for (i in 0..n) {
             dp[i][0] = i
         }
 
-        for (j in 0..actual.size) {
+        for (j in 0..m) {
             dp[0][j] = j
         }
 
-        for (i in 1..expected.size) {
-            for (j in 1..actual.size) {
+        for (i in 1..n) {
+            for (j in 1..m) {
 
                 val cost =
                     if (expected[i - 1] == actual[j - 1]) 0 else 1
@@ -377,24 +431,74 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        val distance = dp[expected.size][actual.size]
+        val distance = dp[n][m]
 
         val score = (
-            (1.0 - distance.toDouble() / maxOf(
-                expected.size,
-                actual.size
-            )) * 100
+            (1.0 - distance.toDouble() / maxOf(n, m)) * 100
         ).toInt().coerceIn(0, 100)
 
-        val exact = expected == actual
+        val details = mutableListOf<String>()
 
-        return if (exact) {
-            "완벽하게 일치합니다! 🎉\n문장 일치도: 100%"
+        var i = n
+        var j = m
+
+        while (i > 0 || j > 0) {
+
+            if (
+                i > 0 &&
+                j > 0 &&
+                expected[i - 1] == actual[j - 1]
+            ) {
+                details.add(
+                    "✓  ${expected[i - 1]}  →  ${actual[j - 1]}  일치"
+                )
+                i--
+                j--
+
+            } else if (
+                i > 0 &&
+                j > 0 &&
+                dp[i][j] == dp[i - 1][j - 1] + 1
+            ) {
+                details.add(
+                    "△  ${expected[i - 1]}  →  ${actual[j - 1]}  다른 단어"
+                )
+                i--
+                j--
+
+            } else if (
+                i > 0 &&
+                dp[i][j] == dp[i - 1][j] + 1
+            ) {
+                details.add(
+                    "✕  ${expected[i - 1]}  →  누락"
+                )
+                i--
+
+            } else {
+                details.add(
+                    "+  추가 단어: ${actual[j - 1]}"
+                )
+                j--
+            }
+        }
+
+        details.reverse()
+
+        val heading = if (distance == 0) {
+            "완벽하게 일치합니다! 🎉"
         } else {
-            "문장 일치도: ${score}%\n" +
-            "기준 단어 수: ${expected.size}개\n" +
-            "인식 단어 수: ${actual.size}개\n" +
-            "다시 한 번 천천히 읽어 보세요."
+            "다시 읽어 보세요."
+        }
+
+        return buildString {
+            appendLine(heading)
+            appendLine()
+            appendLine("문장 일치도: ${score}%")
+            appendLine("기준 단어: ${n}개 / 인식 단어: ${m}개")
+            appendLine()
+            appendLine("단어별 결과")
+            append(details.joinToString("\n"))
         }
     }
 
@@ -427,7 +531,7 @@ class MainActivity : ComponentActivity() {
 
             try {
                 result.text = "음성인식 중…"
-                comparison.text = "기준 문장과 비교하는 중…"
+                comparison.text = "기준 문장과 비교 중…"
 
                 setStatus("기기 내 음성인식 모델 확인 중…")
 
@@ -524,10 +628,11 @@ class MainActivity : ComponentActivity() {
                                     setStatus("음성인식 결과가 비어 있습니다.")
                                 } else {
                                     result.text = spoken
+
                                     comparison.text =
                                         compareSentences(reference, spoken)
 
-                                    setStatus("음성인식 및 문장 비교 완료!")
+                                    setStatus("음성인식 및 단어 비교 완료!")
                                 }
                             }
 
