@@ -7,6 +7,7 @@ import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.os.Bundle
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
@@ -33,6 +34,8 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var status: TextView
     private lateinit var result: TextView
+    private lateinit var comparison: TextView
+    private lateinit var referenceInput: EditText
     private lateinit var modeGroup: RadioGroup
     private lateinit var recordButton: Button
 
@@ -42,7 +45,9 @@ class MainActivity : ComponentActivity() {
     private var recording = false
 
     private val permissionRequest =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { granted ->
             if (granted) {
                 startRecording()
             } else {
@@ -56,7 +61,7 @@ class MainActivity : ComponentActivity() {
         audioFile = File(filesDir, "speech_test.m4a")
 
         buildScreen()
-        setStatus("준비됨. 영어 문장을 한 번 말해 보세요.")
+        setStatus("기준 문장을 입력하고 녹음을 시작하세요.")
     }
 
     private fun buildScreen() {
@@ -67,14 +72,29 @@ class MainActivity : ComponentActivity() {
         }
 
         content.addView(TextView(this).apply {
-            text = "무료 음성 파일 인식 테스트"
-            textSize = 23f
-            setPadding(0, 0, 0, 18)
+            text = "영어 발음 자동 테스트"
+            textSize = 24f
+            setPadding(0, 0, 0, 16)
         })
 
         content.addView(TextView(this).apply {
-            text = "인식 모드"
+            text = "① 기준 영어 문장"
+            textSize = 17f
+        })
+
+        referenceInput = EditText(this).apply {
+            hint = "예: How are you doing today?"
+            textSize = 18f
+            minLines = 2
+            setPadding(12, 12, 12, 12)
+        }
+
+        content.addView(referenceInput)
+
+        content.addView(TextView(this).apply {
+            text = "② 인식 모드"
             textSize = 16f
+            setPadding(0, 16, 0, 4)
         })
 
         modeGroup = RadioGroup(this).apply {
@@ -83,19 +103,19 @@ class MainActivity : ComponentActivity() {
 
         modeGroup.addView(RadioButton(this).apply {
             id = 1
-            text = "기본 모드 (기기 내 음성인식)"
+            text = "기본 모드"
             isChecked = true
         })
 
         modeGroup.addView(RadioButton(this).apply {
             id = 2
-            text = "고급 모드 (지원 기기에서만)"
+            text = "고급 모드"
         })
 
         content.addView(modeGroup)
 
         recordButton = Button(this).apply {
-            text = "녹음 시작"
+            text = "③ 녹음 시작"
 
             setOnClickListener {
                 if (recording) {
@@ -125,7 +145,7 @@ class MainActivity : ComponentActivity() {
         })
 
         content.addView(Button(this).apply {
-            text = "저장된 녹음 파일 인식"
+            text = "저장된 파일 다시 인식"
             setOnClickListener {
                 recognizeFile()
             }
@@ -133,18 +153,38 @@ class MainActivity : ComponentActivity() {
 
         status = TextView(this).apply {
             textSize = 15f
-            setPadding(0, 18, 0, 12)
+            setPadding(0, 18, 0, 10)
         }
 
         content.addView(status)
 
+        content.addView(TextView(this).apply {
+            text = "③ 음성인식 결과"
+            textSize = 17f
+            setPadding(0, 12, 0, 4)
+        })
+
         result = TextView(this).apply {
             textSize = 19f
-            setPadding(0, 8, 0, 20)
-            text = "인식 결과가 여기에 표시됩니다."
+            setPadding(0, 8, 0, 12)
+            text = "아직 인식 결과가 없습니다."
         }
 
         content.addView(result)
+
+        content.addView(TextView(this).apply {
+            text = "④ 기준 문장과 비교"
+            textSize = 17f
+            setPadding(0, 12, 0, 4)
+        })
+
+        comparison = TextView(this).apply {
+            textSize = 19f
+            setPadding(0, 8, 0, 20)
+            text = "녹음 후 자동으로 비교합니다."
+        }
+
+        content.addView(comparison)
 
         val scroll = ScrollView(this)
         scroll.addView(content)
@@ -160,6 +200,13 @@ class MainActivity : ComponentActivity() {
 
     private fun startRecording() {
 
+        val reference = referenceInput.text.toString().trim()
+
+        if (reference.isEmpty()) {
+            setStatus("먼저 기준 영어 문장을 입력하세요.")
+            return
+        }
+
         try {
             val file = audioFile
                 ?: File(filesDir, "speech_test.m4a").also {
@@ -169,6 +216,9 @@ class MainActivity : ComponentActivity() {
             if (file.exists()) {
                 file.delete()
             }
+
+            result.text = "녹음 후 자동으로 인식합니다."
+            comparison.text = "비교 대기 중…"
 
             val newRecorder = MediaRecorder()
 
@@ -196,13 +246,9 @@ class MainActivity : ComponentActivity() {
 
             recordButton.text = "녹음 종료"
 
-            setStatus(
-                "녹음 중… 영어 문장을 한 번 말한 뒤 녹음 종료를 누르세요."
-            )
+            setStatus("녹음 중… 문장을 말한 뒤 녹음 종료를 누르세요.")
 
         } catch (e: Exception) {
-
-            recording = false
 
             try {
                 recorder?.release()
@@ -210,7 +256,8 @@ class MainActivity : ComponentActivity() {
             }
 
             recorder = null
-            recordButton.text = "녹음 시작"
+            recording = false
+            recordButton.text = "③ 녹음 시작"
 
             setStatus("녹음 시작 실패: ${e.message}")
         }
@@ -220,19 +267,23 @@ class MainActivity : ComponentActivity() {
 
         try {
             recorder?.stop()
-            recorder?.reset()
             recorder?.release()
 
             recorder = null
             recording = false
 
-            recordButton.text = "녹음 시작"
+            recordButton.text = "③ 녹음 시작"
 
             val size = audioFile?.length() ?: 0L
 
-            setStatus(
-                "녹음 저장 완료 (${size} bytes). 이제 재생하거나 인식할 수 있어요."
-            )
+            if (size == 0L) {
+                setStatus("녹음 파일이 비어 있습니다. 다시 녹음해 주세요.")
+                return
+            }
+
+            setStatus("녹음 저장 완료. 자동 음성인식을 시작합니다.")
+
+            recognizeFile()
 
         } catch (e: Exception) {
 
@@ -243,8 +294,7 @@ class MainActivity : ComponentActivity() {
 
             recorder = null
             recording = false
-
-            recordButton.text = "녹음 시작"
+            recordButton.text = "③ 녹음 시작"
 
             setStatus("녹음 저장 실패: ${e.message}")
         }
@@ -281,12 +331,86 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun normalize(text: String): List<String> {
+        return text.lowercase(Locale.US)
+            .replace(Regex("[^a-z0-9']"), " ")
+            .trim()
+            .split(Regex("\\s+"))
+            .filter { it.isNotBlank() }
+    }
+
+    private fun compareSentences(
+        reference: String,
+        spoken: String
+    ): String {
+
+        val expected = normalize(reference)
+        val actual = normalize(spoken)
+
+        if (expected.isEmpty() || actual.isEmpty()) {
+            return "비교할 문장이 충분하지 않습니다."
+        }
+
+        val dp = Array(expected.size + 1) {
+            IntArray(actual.size + 1)
+        }
+
+        for (i in 0..expected.size) {
+            dp[i][0] = i
+        }
+
+        for (j in 0..actual.size) {
+            dp[0][j] = j
+        }
+
+        for (i in 1..expected.size) {
+            for (j in 1..actual.size) {
+
+                val cost =
+                    if (expected[i - 1] == actual[j - 1]) 0 else 1
+
+                dp[i][j] = minOf(
+                    dp[i - 1][j] + 1,
+                    dp[i][j - 1] + 1,
+                    dp[i - 1][j - 1] + cost
+                )
+            }
+        }
+
+        val distance = dp[expected.size][actual.size]
+
+        val score = (
+            (1.0 - distance.toDouble() / maxOf(
+                expected.size,
+                actual.size
+            )) * 100
+        ).toInt().coerceIn(0, 100)
+
+        val exact = expected == actual
+
+        return if (exact) {
+            "완벽하게 일치합니다! 🎉\n문장 일치도: 100%"
+        } else {
+            "문장 일치도: ${score}%\n" +
+            "기준 단어 수: ${expected.size}개\n" +
+            "인식 단어 수: ${actual.size}개\n" +
+            "다시 한 번 천천히 읽어 보세요."
+        }
+    }
+
     private fun recognizeFile() {
 
         val file = audioFile
 
         if (file == null || !file.exists() || file.length() == 0L) {
             setStatus("먼저 영어 문장을 녹음해 주세요.")
+            return
+        }
+
+        val reference = referenceInput.text.toString().trim()
+
+        if (reference.isEmpty()) {
+            setStatus("비교할 기준 문장을 입력하세요.")
             return
         }
 
@@ -302,8 +426,10 @@ class MainActivity : ComponentActivity() {
             var recognizer: SpeechRecognizer? = null
 
             try {
-                result.text = "인식 준비 중…"
-                setStatus("기기 내 영어 음성인식 모델 상태 확인 중…")
+                result.text = "음성인식 중…"
+                comparison.text = "기준 문장과 비교하는 중…"
+
+                setStatus("기기 내 음성인식 모델 확인 중…")
 
                 val options = speechRecognizerOptions {
                     locale = Locale.US
@@ -316,9 +442,7 @@ class MainActivity : ComponentActivity() {
 
                 if (modelStatus == FeatureStatus.DOWNLOADABLE) {
 
-                    setStatus(
-                        "음성인식 모델 다운로드 중… 최초 1회 인터넷 연결이 필요할 수 있어요."
-                    )
+                    setStatus("음성인식 모델 다운로드 중…")
 
                     recognizer.download().collect { downloadStatus ->
 
@@ -335,7 +459,7 @@ class MainActivity : ComponentActivity() {
                             }
 
                             is DownloadStatus.DownloadCompleted -> {
-                                setStatus("모델 다운로드 완료. 인식 준비 중…")
+                                setStatus("모델 다운로드 완료.")
                             }
 
                             is DownloadStatus.DownloadFailed -> {
@@ -350,27 +474,13 @@ class MainActivity : ComponentActivity() {
                 }
 
                 if (modelStatus != FeatureStatus.AVAILABLE) {
-
-                    val message = when (modelStatus) {
-                        FeatureStatus.UNAVAILABLE ->
-                            "이 기기에서 선택한 음성인식 모드를 사용할 수 없습니다."
-
-                        FeatureStatus.DOWNLOADING ->
-                            "모델이 아직 다운로드 중입니다. 잠시 후 다시 시도해 주세요."
-
-                        FeatureStatus.DOWNLOADABLE ->
-                            "음성인식 모델을 아직 사용할 수 없습니다."
-
-                        else ->
-                            "모델 준비 상태를 확인할 수 없습니다. 상태 코드: $modelStatus"
-                    }
-
-                    setStatus(message)
-                    result.text = "인식 결과 없음"
+                    setStatus(
+                        "음성인식 모델을 사용할 수 없습니다. 상태: $modelStatus"
+                    )
                     return@launch
                 }
 
-                setStatus("녹음 파일을 기기에서 분석 중…")
+                setStatus("녹음 파일 분석 중…")
 
                 val recognized = StringBuilder()
 
@@ -395,7 +505,6 @@ class MainActivity : ComponentActivity() {
                                 }
 
                                 recognized.append(response.text)
-
                                 result.text = recognized.toString()
                             }
 
@@ -407,14 +516,18 @@ class MainActivity : ComponentActivity() {
 
                             is SpeechRecognizerResponse.CompletedResponse -> {
 
-                                if (recognized.isEmpty()) {
-                                    setStatus(
-                                        "인식된 문장이 없습니다. 더 또렷하고 길게 말해 다시 시도해 주세요."
-                                    )
+                                val spoken = recognized.toString().trim()
+
+                                if (spoken.isEmpty()) {
+                                    result.text = "인식된 문장이 없습니다."
+                                    comparison.text = "비교할 수 없습니다."
+                                    setStatus("음성인식 결과가 비어 있습니다.")
                                 } else {
-                                    setStatus(
-                                        "인식 완료. 녹음 파일은 기기 안에 저장되어 있습니다."
-                                    )
+                                    result.text = spoken
+                                    comparison.text =
+                                        compareSentences(reference, spoken)
+
+                                    setStatus("음성인식 및 문장 비교 완료!")
                                 }
                             }
 
@@ -426,10 +539,11 @@ class MainActivity : ComponentActivity() {
             } catch (e: Exception) {
 
                 setStatus(
-                    "인식 실행 실패: ${e.javaClass.simpleName}: ${e.message}"
+                    "인식 실패: ${e.javaClass.simpleName}: ${e.message}"
                 )
 
                 result.text = "인식 결과 없음"
+                comparison.text = "비교하지 못했습니다."
 
             } finally {
 
