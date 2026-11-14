@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.os.Bundle
+import android.os.CountDownTimer
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
@@ -48,6 +49,7 @@ class MainActivity : ComponentActivity() {
     private var player: MediaPlayer? = null
     private var audioFile: File? = null
     private var recording = false
+    private var countdown: CountDownTimer? = null
 
     private val examples = listOf(
         "How are you doing today?",
@@ -74,7 +76,7 @@ class MainActivity : ComponentActivity() {
         audioFile = File(filesDir, "speech_test.m4a")
 
         buildScreen()
-        setStatus("예문을 선택하고 녹음을 시작하세요.")
+        setStatus("예문을 선택하고 녹음 시작을 누르세요.")
     }
 
     private fun buildScreen() {
@@ -104,14 +106,12 @@ class MainActivity : ComponentActivity() {
 
         exampleSpinner = Spinner(this)
 
-        val exampleLabels = examples.mapIndexed { index, sentence ->
-            "${index + 1}. $sentence"
-        }
-
         val adapter = ArrayAdapter(
             this,
             android.R.layout.simple_spinner_item,
-            exampleLabels
+            examples.mapIndexed { index, sentence ->
+                "${index + 1}. $sentence"
+            }
         ).apply {
             setDropDownViewResource(
                 android.R.layout.simple_spinner_dropdown_item
@@ -134,8 +134,7 @@ class MainActivity : ComponentActivity() {
                     result.text = "아직 인식 결과가 없습니다."
                 }
 
-                override fun onNothingSelected(parent: AdapterView<*>?) {
-                }
+                override fun onNothingSelected(parent: AdapterView<*>?) {}
             }
 
         content.addView(exampleSpinner)
@@ -165,12 +164,12 @@ class MainActivity : ComponentActivity() {
         content.addView(modeGroup)
 
         recordButton = Button(this).apply {
-            text = "③ 녹음 시작"
+            text = "③ 5초 녹음 시작"
 
             setOnClickListener {
-                if (recording) {
-                    stopRecording()
-                } else if (
+                if (recording) return@setOnClickListener
+
+                if (
                     ContextCompat.checkSelfPermission(
                         this@MainActivity,
                         Manifest.permission.RECORD_AUDIO
@@ -194,18 +193,10 @@ class MainActivity : ComponentActivity() {
             }
         })
 
-        content.addView(Button(this).apply {
-            text = "저장된 파일 다시 인식"
-            setOnClickListener {
-                recognizeFile()
-            }
-        })
-
         status = TextView(this).apply {
             textSize = 15f
             setPadding(0, 18, 0, 10)
         }
-
         content.addView(status)
 
         content.addView(TextView(this).apply {
@@ -219,7 +210,6 @@ class MainActivity : ComponentActivity() {
             setPadding(0, 8, 0, 12)
             text = "아직 인식 결과가 없습니다."
         }
-
         content.addView(result)
 
         content.addView(TextView(this).apply {
@@ -233,12 +223,10 @@ class MainActivity : ComponentActivity() {
             setPadding(0, 8, 0, 20)
             text = "녹음 후 자동으로 비교합니다."
         }
-
         content.addView(comparison)
 
         val scroll = ScrollView(this)
         scroll.addView(content)
-
         setContentView(scroll)
     }
 
@@ -263,11 +251,9 @@ class MainActivity : ComponentActivity() {
                     audioFile = it
                 }
 
-            if (file.exists()) {
-                file.delete()
-            }
+            if (file.exists()) file.delete()
 
-            result.text = "녹음 후 자동으로 인식합니다."
+            result.text = "5초 녹음 중…"
             comparison.text = "비교 대기 중…"
 
             val newRecorder = MediaRecorder()
@@ -275,15 +261,12 @@ class MainActivity : ComponentActivity() {
             newRecorder.setAudioSource(
                 MediaRecorder.AudioSource.MIC
             )
-
             newRecorder.setOutputFormat(
                 MediaRecorder.OutputFormat.MPEG_4
             )
-
             newRecorder.setAudioEncoder(
                 MediaRecorder.AudioEncoder.AAC
             )
-
             newRecorder.setAudioSamplingRate(44100)
             newRecorder.setAudioEncodingBitRate(96000)
             newRecorder.setOutputFile(file.absolutePath)
@@ -294,26 +277,45 @@ class MainActivity : ComponentActivity() {
             recorder = newRecorder
             recording = true
 
-            recordButton.text = "녹음 종료"
+            recordButton.isEnabled = false
+            recordButton.text = "녹음 중… 5초"
 
-            setStatus("녹음 중… 문장을 말한 뒤 종료하세요.")
+            setStatus("지금 영어 문장을 말하세요!")
+
+            countdown?.cancel()
+            countdown = object : CountDownTimer(5000, 1000) {
+
+                override fun onTick(millisUntilFinished: Long) {
+                    val seconds =
+                        (millisUntilFinished + 999) / 1000
+
+                    recordButton.text = "녹음 중… ${seconds}초"
+                    setStatus("${seconds}초 남았습니다. 계속 말하세요.")
+                }
+
+                override fun onFinish() {
+                    stopRecordingAutomatically()
+                }
+            }.start()
 
         } catch (e: Exception) {
 
             try {
                 recorder?.release()
-            } catch (_: Exception) {
-            }
+            } catch (_: Exception) {}
 
             recorder = null
             recording = false
-            recordButton.text = "③ 녹음 시작"
+            recordButton.isEnabled = true
+            recordButton.text = "③ 5초 녹음 시작"
 
             setStatus("녹음 시작 실패: ${e.message}")
         }
     }
 
-    private fun stopRecording() {
+    private fun stopRecordingAutomatically() {
+
+        if (!recording) return
 
         try {
             recorder?.stop()
@@ -322,7 +324,8 @@ class MainActivity : ComponentActivity() {
             recorder = null
             recording = false
 
-            recordButton.text = "③ 녹음 시작"
+            recordButton.isEnabled = true
+            recordButton.text = "③ 5초 녹음 시작"
 
             val size = audioFile?.length() ?: 0L
 
@@ -331,21 +334,20 @@ class MainActivity : ComponentActivity() {
                 return
             }
 
-            setStatus("녹음 저장 완료. 자동 인식 중…")
-
+            setStatus("5초 녹음 저장 완료. 자동 인식 중…")
             recognizeFile()
 
         } catch (e: Exception) {
 
             try {
                 recorder?.release()
-            } catch (_: Exception) {
-            }
+            } catch (_: Exception) {}
 
             recorder = null
             recording = false
 
-            recordButton.text = "③ 녹음 시작"
+            recordButton.isEnabled = true
+            recordButton.text = "③ 5초 녹음 시작"
 
             setStatus("녹음 저장 실패: ${e.message}")
         }
@@ -405,21 +407,13 @@ class MainActivity : ComponentActivity() {
         val n = expected.size
         val m = actual.size
 
-        val dp = Array(n + 1) {
-            IntArray(m + 1)
-        }
+        val dp = Array(n + 1) { IntArray(m + 1) }
 
-        for (i in 0..n) {
-            dp[i][0] = i
-        }
-
-        for (j in 0..m) {
-            dp[0][j] = j
-        }
+        for (i in 0..n) dp[i][0] = i
+        for (j in 0..m) dp[0][j] = j
 
         for (i in 1..n) {
             for (j in 1..m) {
-
                 val cost =
                     if (expected[i - 1] == actual[j - 1]) 0 else 1
 
@@ -445,8 +439,7 @@ class MainActivity : ComponentActivity() {
         while (i > 0 || j > 0) {
 
             if (
-                i > 0 &&
-                j > 0 &&
+                i > 0 && j > 0 &&
                 expected[i - 1] == actual[j - 1]
             ) {
                 details.add(
@@ -456,8 +449,7 @@ class MainActivity : ComponentActivity() {
                 j--
 
             } else if (
-                i > 0 &&
-                j > 0 &&
+                i > 0 && j > 0 &&
                 dp[i][j] == dp[i - 1][j - 1] + 1
             ) {
                 details.add(
@@ -552,25 +544,21 @@ class MainActivity : ComponentActivity() {
 
                         when (downloadStatus) {
 
-                            is DownloadStatus.DownloadStarted -> {
+                            is DownloadStatus.DownloadStarted ->
                                 setStatus("모델 다운로드 시작…")
-                            }
 
-                            is DownloadStatus.DownloadProgress -> {
+                            is DownloadStatus.DownloadProgress ->
                                 setStatus(
                                     "모델 다운로드 중… ${downloadStatus.totalBytesDownloaded} bytes"
                                 )
-                            }
 
-                            is DownloadStatus.DownloadCompleted -> {
+                            is DownloadStatus.DownloadCompleted ->
                                 setStatus("모델 다운로드 완료.")
-                            }
 
-                            is DownloadStatus.DownloadFailed -> {
+                            is DownloadStatus.DownloadFailed ->
                                 setStatus(
                                     "모델 다운로드 실패: ${downloadStatus.e.message}"
                                 )
-                            }
                         }
                     }
 
@@ -603,7 +591,6 @@ class MainActivity : ComponentActivity() {
                             }
 
                             is SpeechRecognizerResponse.FinalTextResponse -> {
-
                                 if (recognized.isNotEmpty()) {
                                     recognized.append(" ")
                                 }
@@ -628,7 +615,6 @@ class MainActivity : ComponentActivity() {
                                     setStatus("음성인식 결과가 비어 있습니다.")
                                 } else {
                                     result.text = spoken
-
                                     comparison.text =
                                         compareSentences(reference, spoken)
 
@@ -651,26 +637,24 @@ class MainActivity : ComponentActivity() {
                 comparison.text = "비교하지 못했습니다."
 
             } finally {
-
                 try {
                     recognizer?.close()
-                } catch (_: Exception) {
-                }
+                } catch (_: Exception) {}
             }
         }
     }
 
     override fun onDestroy() {
 
+        countdown?.cancel()
+
         try {
             recorder?.release()
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) {}
 
         try {
             player?.release()
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) {}
 
         super.onDestroy()
     }
